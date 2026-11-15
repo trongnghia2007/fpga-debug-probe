@@ -1,0 +1,145 @@
+module debug_probe_phase1_top (
+    input  logic        MAX10_CLK1_50,
+    input  logic [9:0]  SW,
+    input  logic [1:0]  KEY,
+
+    input  logic [3:0]  KB_KEY,
+    output logic [7:0]  KB_LED,
+
+    output logic [9:0]  LEDR,
+    output logic [6:0]  HEX0,
+    output logic [6:0]  HEX1,
+    output logic [6:0]  HEX2,
+    output logic [6:0]  HEX3,
+    output logic [6:0]  HEX4,
+    output logic [6:0]  HEX5
+);
+
+    logic rst_n;
+    logic tick_1ms;
+    logic tick_500ms;
+
+    logic arm_pressed_raw;
+    logic trigger_pressed_raw;
+    logic clear_pressed_raw;
+
+    logic arm_level;
+    logic trigger_level;
+    logic clear_level;
+
+    logic arm_pulse;
+    logic trigger_pulse;
+    logic clear_pulse;
+
+    logic [1:0] state;
+    logic armed;
+    logic done;
+    logic heartbeat;
+
+    assign rst_n = KEY[0];
+
+    assign arm_pressed_raw     = ~KB_KEY[0];
+    assign trigger_pressed_raw = ~KB_KEY[1];
+    assign clear_pressed_raw   = ~KB_KEY[3];
+
+    clock_enable #(
+        .CLK_HZ  (50_000_000),
+        .TICK_HZ (1_000)
+    ) u_tick_1ms (
+        .clk  (MAX10_CLK1_50),
+        .rst_n(rst_n),
+        .tick (tick_1ms)
+    );
+
+    clock_enable #(
+        .CLK_HZ  (50_000_000),
+        .TICK_HZ (2)
+    ) u_tick_2hz (
+        .clk  (MAX10_CLK1_50),
+        .rst_n(rst_n),
+        .tick (tick_500ms)
+    );
+
+    always_ff @(posedge MAX10_CLK1_50 or negedge rst_n) begin
+        if (!rst_n)
+            heartbeat <= 1'b0;
+        else if (tick_500ms)
+            heartbeat <= ~heartbeat;
+    end
+
+    button_event #(.STABLE_TICKS(10)) u_arm_button (
+        .clk          (MAX10_CLK1_50),
+        .rst_n        (rst_n),
+        .tick         (tick_1ms),
+        .raw_pressed  (arm_pressed_raw),
+        .pressed_level(arm_level),
+        .pressed_pulse(arm_pulse)
+    );
+
+    button_event #(.STABLE_TICKS(10)) u_trigger_button (
+        .clk          (MAX10_CLK1_50),
+        .rst_n        (rst_n),
+        .tick         (tick_1ms),
+        .raw_pressed  (trigger_pressed_raw),
+        .pressed_level(trigger_level),
+        .pressed_pulse(trigger_pulse)
+    );
+
+    button_event #(.STABLE_TICKS(10)) u_clear_button (
+        .clk          (MAX10_CLK1_50),
+        .rst_n        (rst_n),
+        .tick         (tick_1ms),
+        .raw_pressed  (clear_pressed_raw),
+        .pressed_level(clear_level),
+        .pressed_pulse(clear_pulse)
+    );
+
+    capture_fsm u_capture_fsm (
+        .clk          (MAX10_CLK1_50),
+        .rst_n        (rst_n),
+        .arm_pulse    (arm_pulse),
+        .trigger_pulse(trigger_pulse),
+        .clear_pulse  (clear_pulse),
+        .state        (state),
+        .armed        (armed),
+        .done         (done)
+    );
+
+    assign KB_LED[0] = (state == 2'd0);
+    assign KB_LED[1] = (state == 2'd1);
+    assign KB_LED[2] = (state == 2'd2);
+    assign KB_LED[7:3] = 5'b0;
+
+    assign LEDR[0]   = heartbeat;
+    assign LEDR[1]   = armed;
+    assign LEDR[2]   = done;
+    assign LEDR[5:3] = SW[2:0];
+    assign LEDR[6]   = arm_level;
+    assign LEDR[7]   = trigger_level;
+    assign LEDR[8]   = clear_level;
+    assign LEDR[9]   = 1'b0;
+
+    hex_to_7seg u_hex0 (
+        .hex(SW[3:0]),
+        .seg(HEX0)
+    );
+
+    hex_to_7seg u_hex1 (
+        .hex({2'b00, state}),
+        .seg(HEX1)
+    );
+
+    hex_to_7seg u_hex2 (
+        .hex(4'h0),
+        .seg(HEX2)
+    );
+
+    hex_to_7seg u_hex3 (
+        .hex(4'h0),
+        .seg(HEX3)
+    );
+
+    assign HEX4 = 7'b1111111;
+    assign HEX5 = 7'b1111111;
+
+endmodule
