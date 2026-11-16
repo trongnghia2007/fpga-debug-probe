@@ -1,0 +1,112 @@
+module tb_capture_ram;
+
+    localparam int DATA_WIDTH = 1;
+    localparam int ADDR_WIDTH = 8;
+    localparam int DEPTH      = 2**ADDR_WIDTH;
+
+    logic clk = 1'b0;
+
+    logic                  wr_en;
+    logic [ADDR_WIDTH-1:0] wr_addr;
+    logic [DATA_WIDTH-1:0] wr_data;
+
+    logic [ADDR_WIDTH-1:0] rd_addr;
+    logic [DATA_WIDTH-1:0] rd_data;
+
+    always #10 clk = ~clk;  // 50 MHz
+
+    capture_ram #(
+        .DATA_WIDTH(DATA_WIDTH),
+        .ADDR_WIDTH(ADDR_WIDTH)
+    ) dut (
+        .clk     (clk),
+        .wr_en   (wr_en),
+        .wr_addr (wr_addr),
+        .wr_data (wr_data),
+        .rd_addr (rd_addr),
+        .rd_data (rd_data)
+    );
+
+    function automatic logic pattern(input int addr);
+        pattern = ^addr[ADDR_WIDTH-1:0];
+    endfunction
+
+    task automatic check_all(input bit invert_pattern);
+        logic expected;
+
+        for (int i = 0; i < DEPTH; i++) begin
+            @(negedge clk);
+            rd_addr = i;
+
+            @(posedge clk);
+            #1;
+
+            expected = pattern(i) ^ invert_pattern;
+
+            if (rd_data !== expected) begin
+                $fatal(
+                    1,
+                    "READ FAIL: addr=%0d expected=%b actual=%b",
+                    i, expected, rd_data
+                );
+            end
+        end
+    endtask
+
+    initial begin
+        wr_en   = 1'b0;
+        wr_addr = '0;
+        wr_data = '0;
+        rd_addr = '0;
+
+        repeat (2) @(negedge clk);
+
+        // Write the first pattern to all addresses.
+        for (int i = 0; i < DEPTH; i++) begin
+            @(negedge clk);
+            wr_en   = 1'b1;
+            wr_addr = i;
+            wr_data = pattern(i);
+        end
+
+        @(negedge clk);
+        wr_en = 1'b0;
+
+        check_all(1'b0);
+        $display("PASS: all 256 addresses read back correctly");
+
+        // Attempt writes with write enable disabled.
+        for (int i = 0; i < DEPTH; i++) begin
+            @(negedge clk);
+            wr_en   = 1'b0;
+            wr_addr = i;
+            wr_data = ~pattern(i);
+        end
+
+        check_all(1'b0);
+        $display("PASS: wr_en=0 preserves stored data");
+
+        // Overwrite every address with the inverted pattern.
+        for (int i = 0; i < DEPTH; i++) begin
+            @(negedge clk);
+            wr_en   = 1'b1;
+            wr_addr = i;
+            wr_data = ~pattern(i);
+        end
+
+        @(negedge clk);
+        wr_en = 1'b0;
+
+        check_all(1'b1);
+        $display("PASS: all 256 addresses overwritten correctly");
+
+        $display("ALL RAM TESTS PASSED");
+        $finish;
+    end
+
+    initial begin
+        #100000;
+        $fatal(1, "TIMEOUT");
+    end
+
+endmodule
